@@ -10,7 +10,6 @@
 		<clobbers target="SensingKit" />
 	</js-module>
 	<platform name="android">
-		<config-file parent="/*" target="AndroidManifest.xml"></config-file>
 		<config-file parent="/*" target="res/xml/config.xml">
 			<feature name="SensingKit">
 				<param name="android-package" value="uk.ac.nott.mrl.sensingKit.SensingKit" />
@@ -21,8 +20,7 @@
 		<framework src="com.squareup.okhttp3:okhttp:+" />
 		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
 
-		<resource-file src="libs/SensingKitLib-release.aar"
-			target="libs/SensingKitLib-release.aar" />
+		<resource-file src="libs/SensingKitLib-release.aar" target="libs/SensingKitLib-release.aar" />
 		<source-file src="src/android/SensingKit.java" target-dir="src/uk/ac/nott/mrl/sensingKit" />
 	</platform>
 </plugin>

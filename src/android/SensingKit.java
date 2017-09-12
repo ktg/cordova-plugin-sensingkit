@@ -93,6 +93,7 @@ public class SensingKit extends CordovaPlugin
 		if (action.equals("start") && args.length() == 1)
 		{
 			startSensing(args.getString(0));
+			callbackContext.success();
 			return true;
 		}
 		else if(action.equals("isRunning"))
@@ -103,6 +104,7 @@ public class SensingKit extends CordovaPlugin
 		else if(action.equals("stop"))
 		{
 			stopSensing();
+			callbackContext.success();
 			return true;
 		}
 		return false;
