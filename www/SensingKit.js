@@ -5,9 +5,15 @@ module.exports = {
 		}, "SensingKit", "start", [url]);
 	},
 
-	listSensors: function (callback) {
+	isRunning: function(callback) {
 		cordova.exec(callback, function (err) {
 			callback('Error: ' + err);
-		}, "SensingKit", "listSensors");
+		}, "SensingKit", "isRunning");
+	},
+
+	stop: function (callback) {
+		cordova.exec(callback, function (err) {
+			callback('Error: ' + err);
+		}, "SensingKit", "stop");
 	}
 };

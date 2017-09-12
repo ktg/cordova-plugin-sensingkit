@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="cordova-plugin-sensingkit" version="0.1.0"
+<plugin id="cordova-plugin-sensingkit" version="0.1.1"
 	xmlns="http://apache.org/cordova/ns/plugins/1.0">
 	<name>SensingKit</name>
 	<author>Kevin Glover</author>
@@ -17,7 +17,7 @@
 			</feature>
 		</config-file>
 		<framework src="org.nanohttpd:nanohttpd-webserver:+" />
-		<framework src="com.google.android.gms:play-services-location:+" />
+		<framework src="com.google.android.gms:play-services-location:7.5.0" />
 		<framework src="com.squareup.okhttp3:okhttp:+" />
 		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
 

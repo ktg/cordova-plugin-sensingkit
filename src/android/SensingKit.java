@@ -52,6 +52,7 @@ import okhttp3.Request;
 
 public class SensingKit extends CordovaPlugin
 {
+	private static final OkHttpClient client = new OkHttpClient();
 	private static final Logger logger = Logger.getLogger(SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
 	private NanoHTTPD webServer = null;
@@ -94,15 +95,14 @@ public class SensingKit extends CordovaPlugin
 			startSensing(args.getString(0));
 			return true;
 		}
+		else if(action.equals("isRunning"))
+		{
+			callbackContext.success(Boolean.toString(webServer != null));
+			return true;
+		}
 		else if(action.equals("stop"))
 		{
 			stopSensing();
-			return true;
-		}
-		else if (action.equals("listSensors"))
-		{
-			JSONArray array = null;
-			callbackContext.success(array);
 			return true;
 		}
 		return false;
@@ -269,7 +269,6 @@ public class SensingKit extends CordovaPlugin
 						.addQueryParameter("ip", getIPAddress()).build();
 
 				logger.info(query.toString());
-				OkHttpClient client = new OkHttpClient();
 				okhttp3.Response response = client.newCall(new Request.Builder()
 						.url(query)
 						.build()).execute();
