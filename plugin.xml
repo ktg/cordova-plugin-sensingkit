@@ -1,10 +1,10 @@
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="cordova-plugin-sensingkit" version="0.1.1"
+<plugin id="cordova-plugin-sensingKit" version="0.1.1"
 	xmlns="http://apache.org/cordova/ns/plugins/1.0">
 	<name>SensingKit</name>
 	<author>Kevin Glover</author>
 	<description>A Multi-Platform Mobile Sensing Framework for Large-Scale Experiments</description>
-	<license>GNU Affero General Public License v3</license>
+	<license>MIT License</license>
 	<js-module name="SensingKit" src="www/SensingKit.js">
 		<clobbers target="cordova.plugins.SensingKit" />
 		<clobbers target="SensingKit" />
