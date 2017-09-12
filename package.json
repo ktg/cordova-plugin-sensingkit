@@ -1,0 +1,17 @@
+{
+  "name": "artcodes-scanner",
+  "version": "0.1.0",
+  "description": "Simple plugin that returns your string prefixed with hello.",
+  "cordova": {
+    "id": "artcodes-scanner",
+    "platforms": [
+      "android"
+    ]
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-android"
+  ],
+  "author": "Kevin Glover",
+  "license": "AGPL v3"
+}

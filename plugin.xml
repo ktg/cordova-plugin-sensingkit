@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+<plugin id="cordova-plugin-sensingkit" version="0.1.0"
+	xmlns="http://apache.org/cordova/ns/plugins/1.0">
+	<name>SensingKit</name>
+	<author>Kevin Glover</author>
+	<description>A Multi-Platform Mobile Sensing Framework for Large-Scale Experiments</description>
+	<license>GNU Affero General Public License v3</license>
+	<js-module name="SensingKit" src="www/SensingKit.js">
+		<clobbers target="cordova.plugins.SensingKit" />
+		<clobbers target="SensingKit" />
+	</js-module>
+	<platform name="android">
+		<config-file parent="/*" target="AndroidManifest.xml"></config-file>
+		<config-file parent="/*" target="res/xml/config.xml">
+			<feature name="SensingKit">
+				<param name="android-package" value="uk.ac.nott.mrl.sensingKit.SensingKit" />
+			</feature>
+		</config-file>
+		<framework src="org.nanohttpd:nanohttpd-webserver:+" />
+		<framework src="com.google.android.gms:play-services-location:+" />
+		<framework src="com.squareup.okhttp3:okhttp:+" />
+		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
+
+		<resource-file src="libs/SensingKitLib-release.aar"
+			target="libs/SensingKitLib-release.aar" />
+		<source-file src="src/android/SensingKit.java" target-dir="src/uk/ac/nott/mrl/sensingKit" />
+	</platform>
+</plugin>
