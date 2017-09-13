@@ -46,9 +46,12 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import fi.iki.elonen.NanoHTTPD;
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.Response;
 
 public class SensingKit extends CordovaPlugin
 {
@@ -92,16 +95,15 @@ public class SensingKit extends CordovaPlugin
 	{
 		if (action.equals("start") && args.length() == 1)
 		{
-			startSensing(args.getString(0));
-			callbackContext.success();
+			startSensing(args.getString(0), callbackContext);
 			return true;
 		}
-		else if(action.equals("isRunning"))
+		else if (action.equals("isRunning"))
 		{
 			callbackContext.success(Boolean.toString(webServer != null));
 			return true;
 		}
-		else if(action.equals("stop"))
+		else if (action.equals("stop"))
 		{
 			stopSensing();
 			callbackContext.success();
@@ -140,16 +142,16 @@ public class SensingKit extends CordovaPlugin
 
 	private void stopSensing()
 	{
-		if(webServer != null)
+		if (webServer != null)
 		{
 			webServer.stop();
 			webServer = null;
 		}
 	}
 
-	private void startSensing(final String url)
+	private void startSensing(final String url, final CallbackContext callbackContext)
 	{
-		if(webServer == null)
+		if (webServer == null)
 		{
 			webServer = new NanoHTTPD(8080)
 			{
@@ -249,37 +251,52 @@ public class SensingKit extends CordovaPlugin
 						}
 
 						//log("Now streaming " + sensorName + " data to " + ip + ".");
+						return newChunkedResponse(Response.Status.OK, MIME_PLAINTEXT, in);
 					}
-					catch (SKException e)
+					catch (Throwable e)
 					{
 						logger.log(Level.WARNING, e.getMessage(), e);
+						return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", e.getMessage());
 					}
-					catch (IOException e)
-					{
-						logger.log(Level.WARNING, e.getMessage(), e);
-					}
-
-					return newChunkedResponse(Response.Status.OK, MIME_PLAINTEXT, in);
 				}
 			};
 			try
 			{
 				webServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
 
-				HttpUrl query = HttpUrl.parse(url).newBuilder()
-						.addPathSegments("ui/set-mobile-ip")
-						.addQueryParameter("ip", getIPAddress()).build();
-
-				logger.info(query.toString());
-				okhttp3.Response response = client.newCall(new Request.Builder()
-						.url(query)
-						.build()).execute();
-				logger.info(response.code() + ": " + response.body().toString());
 			}
 			catch (IOException e)
 			{
 				logger.log(Level.WARNING, e.getMessage(), e);
 			}
 		}
+
+		HttpUrl query = HttpUrl.parse(url).newBuilder()
+				.addPathSegments("ui/set-mobile-ip")
+				.addQueryParameter("ip", getIPAddress()).build();
+
+		logger.info(query.toString());
+		client.newCall(new Request.Builder()
+				.url(query)
+				.build()).enqueue(new Callback() {
+			@Override
+			public void onFailure(final Call call, final IOException e)
+			{
+				callbackContext.error(e.getMessage());
+			}
+
+			@Override
+			public void onResponse(final Call call, final okhttp3.Response response) throws IOException
+			{
+				if(response.isSuccessful())
+				{
+					callbackContext.success();
+				}
+				else
+				{
+					callbackContext.error(response.message());
+				}
+			}
+		});
 	}
 }
