@@ -208,7 +208,6 @@ public class SensingKit extends CordovaPlugin
 							{
 								try
 								{
-									logger.info(sensorData.getDataInCSV());
 									out.write((sensorData.getDataInCSV() + "\n").getBytes(Charset.forName("UTF-8")));
 								}
 								catch (Exception e)
