@@ -59,11 +59,11 @@ public class SensingKit extends CordovaPlugin
 {
 	private static final int LOCATION_PERMISSION = 387;
 	private static final OkHttpClient client = new OkHttpClient();
-	private static final Logger logger = Logger.getLogger(SensingKit.class.getSimpleName());
+	private static final Logger logger = Logger.getLogger(uk.ac.nott.mrl.sensingKit.SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
 	private NanoHTTPD webServer = null;
 	private final Map<String, SKSensorModuleType> sensors = new HashMap<String, SKSensorModuleType>();
-	private PipedInputStream in;
+	private PipedOutputStream out;
 	private CallbackContext callbackContext;
 
 	@Override
@@ -206,14 +206,16 @@ public class SensingKit extends CordovaPlugin
 					final PipedInputStream in = new PipedInputStream();
 					try
 					{
+						final PipedOutputStream out = new PipedOutputStream(in);
 						if (sensor == SKSensorModuleType.LOCATION && !cordova.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION))
 						{
-							SensingKit.this.in = in;
-							cordova.requestPermission(SensingKit.this, LOCATION_PERMISSION, Manifest.permission.ACCESS_FINE_LOCATION);
+							logger.info("Requesting permission!");
+							uk.ac.nott.mrl.sensingKit.SensingKit.this.out = out;
+							cordova.requestPermission(uk.ac.nott.mrl.sensingKit.SensingKit.this, LOCATION_PERMISSION, Manifest.permission.ACCESS_FINE_LOCATION);
 						}
 						else
 						{
-							createSensorStream(sensor, in);
+							createSensorStream(sensor, out);
 						}
 
 						//log("Now streaming " + sensorName + " data to " + ip + ".");
@@ -276,7 +278,7 @@ public class SensingKit extends CordovaPlugin
 				this.callbackContext.error("Permission Denied");
 				try
 				{
-					in.close();
+					out.close();
 				}
 				catch (Throwable e)
 				{
@@ -289,7 +291,7 @@ public class SensingKit extends CordovaPlugin
 		{
 			try
 			{
-				createSensorStream(SKSensorModuleType.LOCATION, in);
+				createSensorStream(SKSensorModuleType.LOCATION, out);
 			}
 			catch (Throwable e)
 			{
@@ -298,9 +300,8 @@ public class SensingKit extends CordovaPlugin
 		}
 	}
 
-	private void createSensorStream(SKSensorModuleType sensor, PipedInputStream in) throws IOException, SKException
+	private void createSensorStream(SKSensorModuleType sensor, final PipedOutputStream out) throws IOException, SKException
 	{
-		final PipedOutputStream out = new PipedOutputStream(in);
 		sensingKit.subscribeSensorDataListener(sensor, new SKSensorDataListener()
 		{
 			@Override
