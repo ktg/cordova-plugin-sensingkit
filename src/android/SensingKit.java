@@ -19,6 +19,9 @@
 
 package uk.ac.nott.mrl.sensingKit;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
@@ -51,15 +54,17 @@ import okhttp3.Callback;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.Response;
 
 public class SensingKit extends CordovaPlugin
 {
+	private static final int LOCATION_PERMISSION = 387;
 	private static final OkHttpClient client = new OkHttpClient();
 	private static final Logger logger = Logger.getLogger(SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
 	private NanoHTTPD webServer = null;
 	private final Map<String, SKSensorModuleType> sensors = new HashMap<String, SKSensorModuleType>();
+	private PipedInputStream in;
+	private CallbackContext callbackContext;
 
 	@Override
 	public void initialize(final CordovaInterface cordova, final CordovaWebView webView)
@@ -93,9 +98,10 @@ public class SensingKit extends CordovaPlugin
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException
 	{
+		this.callbackContext = callbackContext;
 		if (action.equals("start") && args.length() == 1)
 		{
-			startSensing(args.getString(0), callbackContext);
+			startSensing(args.getString(0));
 			return true;
 		}
 		else if (action.equals("isRunning"))
@@ -149,7 +155,7 @@ public class SensingKit extends CordovaPlugin
 		}
 	}
 
-	private void startSensing(final String url, final CallbackContext callbackContext)
+	private void startSensing(final String url)
 	{
 		if (webServer == null)
 		{
@@ -200,53 +206,14 @@ public class SensingKit extends CordovaPlugin
 					final PipedInputStream in = new PipedInputStream();
 					try
 					{
-						final PipedOutputStream out = new PipedOutputStream(in);
-						sensingKit.subscribeSensorDataListener(sensor, new SKSensorDataListener()
+						if (sensor == SKSensorModuleType.LOCATION && !cordova.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION))
 						{
-							@Override
-							public void onDataReceived(final SKSensorModuleType sensorType, final SKSensorData sensorData)
-							{
-								try
-								{
-									out.write((sensorData.getDataInCSV() + "\n").getBytes(Charset.forName("UTF-8")));
-								}
-								catch (Exception e)
-								{
-									try
-									{
-										sensingKit.unsubscribeSensorDataListener(sensorType, this);
-									}
-									catch (SKException e1)
-									{
-										e1.printStackTrace();
-									}
-									try
-									{
-										sensingKit.stopContinuousSensingWithSensor(sensorType);
-									}
-									catch (SKException e1)
-									{
-										e1.printStackTrace();
-									}
-									try
-									{
-										out.close();
-									}
-									catch (IOException e1)
-									{
-										e1.printStackTrace();
-									}
-									//log("No longer streaming " + sensorName + " data to " + ip + ".");
-								}
-							}
-						});
-						if (!sensingKit.isSensorModuleRegistered(sensor))
-						{
-							sensingKit.registerSensorModule(sensor);
+							SensingKit.this.in = in;
+							cordova.requestPermission(SensingKit.this, LOCATION_PERMISSION, Manifest.permission.ACCESS_FINE_LOCATION);
 						}
-						if (!sensingKit.isSensorModuleSensing(sensor))
+						else
 						{
-							sensingKit.startContinuousSensingWithSensor(sensor);
+							createSensorStream(sensor, in);
 						}
 
 						//log("Now streaming " + sensorName + " data to " + ip + ".");
@@ -262,7 +229,6 @@ public class SensingKit extends CordovaPlugin
 			try
 			{
 				webServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
-
 			}
 			catch (IOException e)
 			{
@@ -277,7 +243,8 @@ public class SensingKit extends CordovaPlugin
 		logger.info(query.toString());
 		client.newCall(new Request.Builder()
 				.url(query)
-				.build()).enqueue(new Callback() {
+				.build()).enqueue(new Callback()
+		{
 			@Override
 			public void onFailure(final Call call, final IOException e)
 			{
@@ -287,7 +254,7 @@ public class SensingKit extends CordovaPlugin
 			@Override
 			public void onResponse(final Call call, final okhttp3.Response response) throws IOException
 			{
-				if(response.isSuccessful())
+				if (response.isSuccessful())
 				{
 					callbackContext.success();
 				}
@@ -297,5 +264,89 @@ public class SensingKit extends CordovaPlugin
 				}
 			}
 		});
+	}
+
+	public void onRequestPermissionResult(int requestCode, String[] permissions,
+	                                      int[] grantResults) throws JSONException
+	{
+		for (int r : grantResults)
+		{
+			if (r == PackageManager.PERMISSION_DENIED)
+			{
+				this.callbackContext.error("Permission Denied");
+				try
+				{
+					in.close();
+				}
+				catch (Throwable e)
+				{
+					logger.log(Level.WARNING, e.getMessage(), e);
+				}
+				return;
+			}
+		}
+		if(requestCode == LOCATION_PERMISSION)
+		{
+			try
+			{
+				createSensorStream(SKSensorModuleType.LOCATION, in);
+			}
+			catch (Throwable e)
+			{
+				logger.log(Level.WARNING, e.getMessage(), e);
+			}
+		}
+	}
+
+	private void createSensorStream(SKSensorModuleType sensor, PipedInputStream in) throws IOException, SKException
+	{
+		final PipedOutputStream out = new PipedOutputStream(in);
+		sensingKit.subscribeSensorDataListener(sensor, new SKSensorDataListener()
+		{
+			@Override
+			public void onDataReceived(final SKSensorModuleType sensorType, final SKSensorData sensorData)
+			{
+				try
+				{
+					out.write((sensorData.getDataInCSV() + "\n").getBytes(Charset.forName("UTF-8")));
+				}
+				catch (Exception e)
+				{
+					try
+					{
+						sensingKit.unsubscribeSensorDataListener(sensorType, this);
+					}
+					catch (SKException e1)
+					{
+						e1.printStackTrace();
+					}
+					try
+					{
+						sensingKit.stopContinuousSensingWithSensor(sensorType);
+					}
+					catch (SKException e1)
+					{
+						e1.printStackTrace();
+					}
+					try
+					{
+						out.close();
+					}
+					catch (IOException e1)
+					{
+						e1.printStackTrace();
+					}
+					//log("No longer streaming " + sensorName + " data to " + ip + ".");
+				}
+			}
+		});
+		if (!sensingKit.isSensorModuleRegistered(sensor))
+		{
+			sensingKit.registerSensorModule(sensor);
+		}
+		if (!sensingKit.isSensorModuleSensing(sensor))
+		{
+			sensingKit.startContinuousSensingWithSensor(sensor);
+		}
 	}
 }
