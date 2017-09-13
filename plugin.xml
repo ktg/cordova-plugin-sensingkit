@@ -10,6 +10,9 @@
 		<clobbers target="SensingKit" />
 	</js-module>
 	<platform name="android">
+		<config-file target="AndroidManifest.xml" parent="/*">
+			<uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"/>
+		</config-file>
 		<config-file parent="/*" target="res/xml/config.xml">
 			<feature name="SensingKit">
 				<param name="android-package" value="uk.ac.nott.mrl.sensingKit.SensingKit" />
