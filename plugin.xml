@@ -11,8 +11,9 @@
 	</js-module>
 	<platform name="android">
 		<config-file target="AndroidManifest.xml" parent="/*">
-			<uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION"/>
-			<uses-permission android:name="android.permission.BLUETOOTH"/>
+			<uses-permission
+				android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+			<uses-permission android:name="android.permission.BLUETOOTH" />
 			<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 		</config-file>
 		<config-file parent="/*" target="res/xml/config.xml">
@@ -20,12 +21,25 @@
 				<param name="android-package" value="uk.ac.nott.mrl.sensingKit.SensingKit" />
 			</feature>
 		</config-file>
-		<framework src="org.nanohttpd:nanohttpd-webserver:+" />
-		<framework src="com.google.android.gms:play-services-location:7.5.0" />
-		<framework src="com.squareup.okhttp3:okhttp:+" />
+		<framework src="org.nanohttpd:nanohttpd-webserver:2.3.1" />
+		<framework src="com.google.android.gms:play-services-location:11.0.1" />
+		<framework src="com.squareup.okhttp3:okhttp:3.9.0" />
+		<framework src="org.altbeacon:android-beacon-library:2.12.2"/>
 		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
 
-		<resource-file src="libs/SensingKitLib-release.aar" target="libs/SensingKitLib-release.aar" />
+		<resource-file src="libs/SensingKitLib-release.aar"
+			target="libs/SensingKitLib-release.aar" />
 		<source-file src="src/android/SensingKit.java" target-dir="src/uk/ac/nott/mrl/sensingKit" />
+	</platform>
+	<platform name="ios">
+		<config-file target="config.xml" parent="/*">
+			<feature name="SensingKit">
+				<param name="ios-package" value="SensingKit" />
+			</feature>
+		</config-file>
+		<dependency id="cordova-plugin-swift-support" spec="~3.1.1" />
+		<framework src="SensingKit" type="podspec" spec="" />
+		<source-file src="src/ios/SensingKit.swift" />
+		<header-file src="src/ios/SensingKit-Bridging-Header.h"/>
 	</platform>
 </plugin>

@@ -21,6 +21,8 @@ package uk.ac.nott.mrl.sensingKit;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
@@ -30,41 +32,144 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.sensingkit.sensingkitlib.SKException;
 import org.sensingkit.sensingkitlib.SKSensorDataListener;
-import org.sensingkit.sensingkitlib.SKSensorModuleType;
+import org.sensingkit.sensingkitlib.SKSensorType;
 import org.sensingkit.sensingkitlib.SensingKitLib;
 import org.sensingkit.sensingkitlib.SensingKitLibInterface;
 import org.sensingkit.sensingkitlib.data.SKSensorData;
 
 import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.nio.charset.Charset;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import fi.iki.elonen.NanoHTTPD;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okio.BufferedSink;
 
 public class SensingKit extends CordovaPlugin
 {
+	private class SensorListener implements SKSensorDataListener
+	{
+		private BlockingQueue<String> queue = new ArrayBlockingQueue<String>(100);
+		private Charset charset = Charset.forName("UTF-8");
+		private boolean connection = false;
+
+		@Override
+		public void onDataReceived(final SKSensorType sensorType, final SKSensorData sensorData)
+		{
+			try
+			{
+				if (!connection)
+				{
+					final HttpUrl url = HttpUrl.parse(urlBase).newBuilder()
+							.addPathSegment("ui")
+							.addPathSegment(sensorType.getName())
+							.addPathSegment("data").build();
+
+					logger.info(url.toString());
+
+					final RequestBody requestBody = new RequestBody()
+					{
+						@Override
+						public MediaType contentType()
+						{
+							return MediaType.parse("text/csv");
+						}
+
+						@Override
+						public void writeTo(BufferedSink sink) throws IOException
+						{
+							while (connection)
+							{
+								try
+								{
+									String data = queue.take();
+									sink.writeString(data, charset);
+									sink.flush();
+								}
+								catch (InterruptedException e)
+								{
+									e.printStackTrace();
+								}
+							}
+						}
+					};
+
+					connection = true;
+					final Request request = new Request.Builder()
+							.url(url)
+							.post(requestBody)
+							.build();
+
+					client.newCall(request).enqueue(new Callback()
+					{
+						@Override
+						public void onFailure(final Call call, final IOException e)
+						{
+							logger.warning(e.getMessage());
+							connection = false;
+						}
+
+						@Override
+						public void onResponse(final Call call, final Response response) throws IOException
+						{
+							logger.warning(response.toString());
+							connection = false;
+						}
+					});
+				}
+				queue.put(sensorData.getDataInCSV() + "\n");
+			}
+			catch (Exception e)
+			{
+				e.printStackTrace();
+				try
+				{
+					sensingKit.unsubscribeSensorDataListener(sensorType, this);
+				}
+				catch (Exception e1)
+				{
+					e1.printStackTrace();
+				}
+				try
+				{
+					sensingKit.stopContinuousSensingWithSensor(sensorType);
+				}
+				catch (Exception e1)
+				{
+					e1.printStackTrace();
+				}
+				connection = false;
+				//log("No longer streaming " + sensorName + " data to " + ip + ".");
+			}
+		}
+	}
+
 	private static final int LOCATION_PERMISSION = 387;
-	private static final OkHttpClient client = new OkHttpClient();
 	private static final Logger logger = Logger.getLogger(uk.ac.nott.mrl.sensingKit.SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
-	private NanoHTTPD webServer = null;
-	private final Map<String, SKSensorModuleType> sensors = new HashMap<String, SKSensorModuleType>();
-	private PipedOutputStream out;
+	private final Map<String, SKSensorType> sensors = new HashMap<String, SKSensorType>();
 	private CallbackContext callbackContext;
+	private static final OkHttpClient client = new OkHttpClient.Builder()
+			.readTimeout(0, TimeUnit.MINUTES)
+			.writeTimeout(0, TimeUnit.MINUTES)
+			.build();
+	private String urlBase;
 
 	@Override
 	public void initialize(final CordovaInterface cordova, final CordovaWebView webView)
@@ -73,17 +178,20 @@ public class SensingKit extends CordovaPlugin
 		try
 		{
 			sensingKit = SensingKitLib.getSensingKitLib(cordova.getActivity());
-			for (SKSensorModuleType sensorType : SKSensorModuleType.values())
+			for (SKSensorType sensorType : SKSensorType.values())
 			{
 				try
 				{
-					sensingKit.registerSensorModule(sensorType);
+					if (sensorType != SKSensorType.AUDIO_LEVEL)
+					{
+						sensingKit.registerSensor(sensorType);
+					}
 				}
 				catch (Exception e)
 				{
 					logger.log(Level.WARNING, e.getMessage(), e);
 				}
-				if (sensingKit.isSensorModuleRegistered(sensorType))
+				if (sensingKit.isSensorRegistered(sensorType))
 				{
 					sensors.put(sensorType.toString().toLowerCase().replace('_', '-'), sensorType);
 				}
@@ -99,255 +207,113 @@ public class SensingKit extends CordovaPlugin
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException
 	{
 		this.callbackContext = callbackContext;
-		if (action.equals("start") && args.length() == 1)
-		{
-			startSensing(args.getString(0));
-			return true;
-		}
-		else if (action.equals("isRunning"))
-		{
-			callbackContext.success(Boolean.toString(webServer != null));
-			return true;
-		}
-		else if (action.equals("stop"))
+		if (action.equals("stop"))
 		{
 			stopSensing();
 			callbackContext.success();
 			return true;
 		}
+		else if (action.equals("listSensors"))
+		{
+			final JSONArray array = new JSONArray();
+			for (SKSensorType sensor : sensors.values())
+			{
+				array.put(sensor.getName());
+			}
+			callbackContext.success(array);
+			return true;
+		}
+		else if (action.equals("startSensors"))
+		{
+			JSONArray array = args.getJSONArray(0);
+			final Set<String> sensors = new HashSet<String>();
+			for (int index = 0; index < array.length(); index++)
+			{
+				sensors.add(array.getString(index));
+			}
+
+			startSensors(sensors, args.getString(1));
+		}
 		return false;
 	}
 
-	private String getIPAddress()
+	private void startSensor(final SKSensorType sensor) throws SKException
 	{
-		try
+		logger.info("Starting " + sensor.getName());
+		if (sensor == SKSensorType.LOCATION && ContextCompat.checkSelfPermission(cordova.getActivity(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
 		{
-			final List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
-			for (final NetworkInterface intf : interfaces)
+			ActivityCompat.requestPermissions(cordova.getActivity(), new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, LOCATION_PERMISSION);
+		}
+		else
+		{
+			sensingKit.subscribeSensorDataListener(sensor, new SensorListener());
+			if (!sensingKit.isSensorRegistered(sensor))
 			{
-				final List<InetAddress> addrs = Collections.list(intf.getInetAddresses());
-				for (final InetAddress addr : addrs)
-				{
-					if (!addr.isLoopbackAddress())
-					{
-						String sAddr = addr.getHostAddress();
-						//boolean isIPv4 = InetAddressUtils.isIPv4Address(sAddr);
-						boolean isIPv4 = sAddr.indexOf(':') < 0;
-						if (isIPv4)
-							return sAddr;
-					}
-				}
+				sensingKit.registerSensor(sensor);
+			}
+			if (!sensingKit.isSensorSensing(sensor))
+			{
+				sensingKit.startContinuousSensingWithSensor(sensor);
 			}
 		}
-		catch (Exception ex)
-		{
-			logger.log(Level.INFO, ex.getMessage(), ex);
-		} // for now eat exceptions
-		return "";
 	}
 
 	private void stopSensing()
 	{
-		if (webServer != null)
-		{
-			webServer.stop();
-			webServer = null;
-		}
+		startSensors(Collections.<String>emptySet(), urlBase);
 	}
 
-	private void startSensing(final String url)
+	private void startSensors(final Collection<String> sensors, final String url)
 	{
-		if (webServer == null)
+		urlBase = url;
+		for (SKSensorType type : this.sensors.values())
 		{
-			webServer = new NanoHTTPD(8080)
-			{
-				private String[] parseURI(String uri)
-				{
-					if (uri == null)
-					{
-						return new String[]{};
-					}
-					if (uri.startsWith("/"))
-					{
-						uri = uri.substring(1);
-					}
-					if (uri.endsWith("/"))
-					{
-						uri = uri.substring(0, uri.length() - 1);
-					}
-
-					uri = uri.toLowerCase();
-					return uri.split("/");
-				}
-
-				@Override
-				public Response serve(IHTTPSession session)
-				{
-					String[] path = parseURI(session.getUri());
-					if (path.length < 1 || path[0].length() < 1)
-					{
-						StringBuilder res = new StringBuilder("<html><head><title>Databox Mobile Source</title></head><body>");
-						res.append("<h1>Databox Mobile Source</h1>");
-						res.append("<h2>Available Sensors</h2>");
-						res.append("<ul>");
-						for (String sensor : sensors.keySet())
-						{
-							res.append("<li>").append(sensor).append("</li>");
-						}
-						res.append("</ul></body></html>\n");
-						return newFixedLengthResponse(res.toString());
-					}
-					final SKSensorModuleType sensor = sensors.get(path[0]);
-					if (sensor == null)
-					{
-						return newFixedLengthResponse(Response.Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT, "Sensor \"" + path[0] + "\" Not Found"); // TODO: Take name out
-					}
-
-					final PipedInputStream in = new PipedInputStream();
-					try
-					{
-						final PipedOutputStream out = new PipedOutputStream(in);
-						if (sensor == SKSensorModuleType.LOCATION && !cordova.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION))
-						{
-							logger.info("Requesting permission!");
-							uk.ac.nott.mrl.sensingKit.SensingKit.this.out = out;
-							cordova.requestPermission(uk.ac.nott.mrl.sensingKit.SensingKit.this, LOCATION_PERMISSION, Manifest.permission.ACCESS_FINE_LOCATION);
-						}
-						else
-						{
-							createSensorStream(sensor, out);
-						}
-
-						//log("Now streaming " + sensorName + " data to " + ip + ".");
-						return newChunkedResponse(Response.Status.OK, MIME_PLAINTEXT, in);
-					}
-					catch (Throwable e)
-					{
-						logger.log(Level.WARNING, e.getMessage(), e);
-						return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", e.getMessage());
-					}
-				}
-			};
 			try
 			{
-				webServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
-			}
-			catch (IOException e)
-			{
-				logger.log(Level.WARNING, e.getMessage(), e);
-			}
-		}
-
-		HttpUrl query = HttpUrl.parse(url).newBuilder()
-				.addPathSegments("ui/set-mobile-ip")
-				.addQueryParameter("ip", getIPAddress()).build();
-
-		logger.info(query.toString());
-		client.newCall(new Request.Builder()
-				.url(query)
-				.build()).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(final Call call, final IOException e)
-			{
-				callbackContext.error(e.getMessage());
-			}
-
-			@Override
-			public void onResponse(final Call call, final okhttp3.Response response) throws IOException
-			{
-				if (response.isSuccessful())
+				if (sensingKit.isSensorSensing(type))
 				{
-					callbackContext.success();
+					if (!sensors.contains(type.getName()))
+					{
+						logger.info("Stopping " + type.getName());
+						sensingKit.stopContinuousSensingWithSensor(type);
+						sensingKit.unsubscribeAllSensorDataListeners(type);
+					}
 				}
 				else
 				{
-					callbackContext.error(response.message());
+					if (sensors.contains(type.getName()))
+					{
+						startSensor(type);
+					}
 				}
 			}
-		});
+			catch (SKException e)
+			{
+				e.printStackTrace();
+			}
+		}
 	}
 
 	public void onRequestPermissionResult(int requestCode, String[] permissions,
 	                                      int[] grantResults) throws JSONException
 	{
-		for (int r : grantResults)
+		if (requestCode == LOCATION_PERMISSION)
 		{
-			if (r == PackageManager.PERMISSION_DENIED)
+			for (int r : grantResults)
 			{
-				this.callbackContext.error("Permission Denied");
-				try
-				{
-					out.close();
-				}
-				catch (Throwable e)
-				{
-					logger.log(Level.WARNING, e.getMessage(), e);
-				}
-				return;
-			}
-		}
-		if(requestCode == LOCATION_PERMISSION)
-		{
-			try
-			{
-				createSensorStream(SKSensorModuleType.LOCATION, out);
-			}
-			catch (Throwable e)
-			{
-				logger.log(Level.WARNING, e.getMessage(), e);
-			}
-		}
-	}
-
-	private void createSensorStream(SKSensorModuleType sensor, final PipedOutputStream out) throws IOException, SKException
-	{
-		sensingKit.subscribeSensorDataListener(sensor, new SKSensorDataListener()
-		{
-			@Override
-			public void onDataReceived(final SKSensorModuleType sensorType, final SKSensorData sensorData)
-			{
-				try
-				{
-					out.write((sensorData.getDataInCSV() + "\n").getBytes(Charset.forName("UTF-8")));
-				}
-				catch (Exception e)
+				if (r == PackageManager.PERMISSION_GRANTED)
 				{
 					try
 					{
-						sensingKit.unsubscribeSensorDataListener(sensorType, this);
+						startSensor(SKSensorType.LOCATION);
 					}
-					catch (SKException e1)
+					catch (Throwable e)
 					{
-						e1.printStackTrace();
+						logger.log(Level.WARNING, e.getMessage(), e);
 					}
-					try
-					{
-						sensingKit.stopContinuousSensingWithSensor(sensorType);
-					}
-					catch (SKException e1)
-					{
-						e1.printStackTrace();
-					}
-					try
-					{
-						out.close();
-					}
-					catch (IOException e1)
-					{
-						e1.printStackTrace();
-					}
-					//log("No longer streaming " + sensorName + " data to " + ip + ".");
+					return;
 				}
 			}
-		});
-		if (!sensingKit.isSensorModuleRegistered(sensor))
-		{
-			sensingKit.registerSensorModule(sensor);
-		}
-		if (!sensingKit.isSensorModuleSensing(sensor))
-		{
-			sensingKit.startContinuousSensingWithSensor(sensor);
 		}
 	}
 }
