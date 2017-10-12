@@ -20,14 +20,14 @@ class Sensor {
 		               Sensor("Altimeter", .Altimeter),
 		               Sensor("Battery", .Battery),
 		               Sensor("DeviceMotion", .DeviceMotion),
-		               Sensor("EddystoneProximity", .EddystoneProximity),
+		               //Sensor("EddystoneProximity", .EddystoneProximity),
 		               Sensor("Gyroscope", .Gyroscope),
 		               //Sensor("iBeaconProximity", .iBeaconProximity),
 		               //Sensor("Location", .Location),
 		               Sensor("Magnetometer", .Magnetometer),
 		               //Sensor("Microphone", .Microphone),
-		               //Sensor("MotionActivity", .MotionActivity),
-		               //Sensor("Pedometer",.Pedometer)
+		               Sensor("MotionActivity", .MotionActivity),
+		               Sensor("Pedometer",.Pedometer)
 			]
 		for sensor in sensorList {
 			if sensingKit?.isSensorAvailable(sensor.type) ?? false {
@@ -90,11 +90,13 @@ class Sensor {
 
 	private func startSensor(_ sensor: Sensor, urlBase: String) {
 		do {
+			sensor.message = ""
 			try sensingKit?.subscribe(to: sensor.type, withHandler: { (sensorType, sensorData, error) in
 				if let error = error {
 					debugPrint(error)
 				} else {
 					if sensor.message.isEmpty {
+						print("Started delayed request for \(sensor.name)")
 						let when = DispatchTime.now() + 2 // seconds
 						DispatchQueue.main.asyncAfter(deadline: when) {
 							let message = sensor.message
@@ -103,12 +105,18 @@ class Sensor {
 							var request = URLRequest(url: URL(string: urlBase + "/ui/\(sensor.name)/data")!)
 							request.httpMethod = "POST"
 							request.httpBody = message.data(using: .utf8)
+							request.addValue("close", forHTTPHeaderField: "Connection")
 							let task = URLSession.shared.dataTask(with: request) { data, response, error in
 								if let error = error {
 									print("error=\(error)")
 								} else if let httpStatus = response as? HTTPURLResponse, httpStatus.statusCode != 200 {
 									print("statusCode should be 200, but is \(httpStatus.statusCode)")
 									print("error=\(httpStatus.statusCode): \(HTTPURLResponse.localizedString(forStatusCode: httpStatus.statusCode))")
+								}
+								if let data = data {
+									if let message = String(data: data, encoding: .utf8) {
+										print(message)
+									}
 								}
 							}
 							task.resume()

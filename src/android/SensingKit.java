@@ -182,7 +182,7 @@ public class SensingKit extends CordovaPlugin
 			{
 				try
 				{
-					if (sensorType != SKSensorType.AUDIO_LEVEL)
+					if (sensorType != SKSensorType.AUDIO_LEVEL && sensingKit.isSensorAvailable(sensorType))
 					{
 						sensingKit.registerSensor(sensorType);
 					}
