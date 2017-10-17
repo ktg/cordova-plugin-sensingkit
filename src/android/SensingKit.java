@@ -32,7 +32,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.sensingkit.sensingkitlib.SKException;
 import org.sensingkit.sensingkitlib.SKSensorDataListener;
-import org.sensingkit.sensingkitlib.SKSensorType;
+import org.sensingkit.sensingkitlib.SKSensorModuleType;
 import org.sensingkit.sensingkitlib.SensingKitLib;
 import org.sensingkit.sensingkitlib.SensingKitLibInterface;
 import org.sensingkit.sensingkitlib.data.SKSensorData;
@@ -63,6 +63,34 @@ import okio.BufferedSink;
 
 public class SensingKit extends CordovaPlugin
 {
+	private static String getSensorName(SKSensorModuleType type)
+	{
+		return toTitleCase(type.name().toLowerCase().replace("_", " "));
+	}
+
+	private static String toTitleCase(String input)
+	{
+		StringBuilder titleCase = new StringBuilder();
+		boolean nextTitleCase = true;
+
+		for (char c : input.toCharArray())
+		{
+			if (Character.isSpaceChar(c))
+			{
+				nextTitleCase = true;
+			}
+			else if (nextTitleCase)
+			{
+				c = Character.toTitleCase(c);
+				nextTitleCase = false;
+			}
+
+			titleCase.append(c);
+		}
+
+		return titleCase.toString();
+	}
+
 	private class SensorListener implements SKSensorDataListener
 	{
 		private BlockingQueue<String> queue = new ArrayBlockingQueue<String>(100);
@@ -70,7 +98,7 @@ public class SensingKit extends CordovaPlugin
 		private boolean connection = false;
 
 		@Override
-		public void onDataReceived(final SKSensorType sensorType, final SKSensorData sensorData)
+		public void onDataReceived(final SKSensorModuleType sensorType, final SKSensorData sensorData)
 		{
 			try
 			{
@@ -78,7 +106,7 @@ public class SensingKit extends CordovaPlugin
 				{
 					final HttpUrl url = HttpUrl.parse(urlBase).newBuilder()
 							.addPathSegment("ui")
-							.addPathSegment(sensorType.getName())
+							.addPathSegment(getSensorName(sensorType))
 							.addPathSegment("data").build();
 
 					logger.info(url.toString());
@@ -99,14 +127,18 @@ public class SensingKit extends CordovaPlugin
 								try
 								{
 									String data = queue.take();
-									sink.writeString(data, charset);
-									sink.flush();
+									if (!data.isEmpty())
+									{
+										sink.writeString(data, charset);
+										sink.flush();
+									}
 								}
-								catch (InterruptedException e)
+								catch (Exception e)
 								{
 									e.printStackTrace();
 								}
 							}
+							logger.info("Finished " + getSensorName(sensorType));
 						}
 					};
 
@@ -163,8 +195,8 @@ public class SensingKit extends CordovaPlugin
 	private static final int LOCATION_PERMISSION = 387;
 	private static final Logger logger = Logger.getLogger(uk.ac.nott.mrl.sensingKit.SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
-	private final Map<String, SKSensorType> sensors = new HashMap<String, SKSensorType>();
-	private CallbackContext callbackContext;
+	private final Collection<SKSensorModuleType> sensors = new HashSet<SKSensorModuleType>();
+	private final Map<SKSensorModuleType, SensorListener> listeners = new HashMap<SKSensorModuleType, SensorListener>();
 	private static final OkHttpClient client = new OkHttpClient.Builder()
 			.readTimeout(0, TimeUnit.MINUTES)
 			.writeTimeout(0, TimeUnit.MINUTES)
@@ -178,22 +210,22 @@ public class SensingKit extends CordovaPlugin
 		try
 		{
 			sensingKit = SensingKitLib.getSensingKitLib(cordova.getActivity());
-			for (SKSensorType sensorType : SKSensorType.values())
+			for (SKSensorModuleType sensorType : SKSensorModuleType.values())
 			{
 				try
 				{
-					if (sensorType != SKSensorType.AUDIO_LEVEL && sensingKit.isSensorAvailable(sensorType))
+					if (sensorType != SKSensorModuleType.AUDIO_LEVEL)
 					{
-						sensingKit.registerSensor(sensorType);
+						sensingKit.registerSensorModule(sensorType);
 					}
 				}
 				catch (Exception e)
 				{
 					logger.log(Level.WARNING, e.getMessage(), e);
 				}
-				if (sensingKit.isSensorRegistered(sensorType))
+				if (sensingKit.isSensorModuleRegistered(sensorType))
 				{
-					sensors.put(sensorType.toString().toLowerCase().replace('_', '-'), sensorType);
+					sensors.add(sensorType);
 				}
 			}
 		}
@@ -206,7 +238,6 @@ public class SensingKit extends CordovaPlugin
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException
 	{
-		this.callbackContext = callbackContext;
 		if (action.equals("stop"))
 		{
 			stopSensing();
@@ -216,16 +247,16 @@ public class SensingKit extends CordovaPlugin
 		else if (action.equals("listSensors"))
 		{
 			final JSONArray array = new JSONArray();
-			for (SKSensorType sensor : sensors.values())
+			for (SKSensorModuleType sensor : sensors)
 			{
-				array.put(sensor.getName());
+				array.put(getSensorName(sensor));
 			}
 			callbackContext.success(array);
 			return true;
 		}
 		else if (action.equals("startSensors"))
 		{
-			JSONArray array = args.getJSONArray(0);
+			final JSONArray array = args.getJSONArray(0);
 			final Set<String> sensors = new HashSet<String>();
 			for (int index = 0; index < array.length(); index++)
 			{
@@ -233,25 +264,29 @@ public class SensingKit extends CordovaPlugin
 			}
 
 			startSensors(sensors, args.getString(1));
+			callbackContext.success();
+			return true;
 		}
 		return false;
 	}
 
-	private void startSensor(final SKSensorType sensor) throws SKException
+	private void startSensor(final SKSensorModuleType sensor) throws SKException
 	{
-		logger.info("Starting " + sensor.getName());
-		if (sensor == SKSensorType.LOCATION && ContextCompat.checkSelfPermission(cordova.getActivity(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+		logger.info("Starting " + getSensorName(sensor));
+		if (sensor == SKSensorModuleType.LOCATION && ContextCompat.checkSelfPermission(cordova.getActivity(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
 		{
 			ActivityCompat.requestPermissions(cordova.getActivity(), new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, LOCATION_PERMISSION);
 		}
 		else
 		{
-			sensingKit.subscribeSensorDataListener(sensor, new SensorListener());
-			if (!sensingKit.isSensorRegistered(sensor))
+			SensorListener listener = new SensorListener();
+			sensingKit.subscribeSensorDataListener(sensor, listener);
+			listeners.put(sensor, listener);
+			if (!sensingKit.isSensorModuleRegistered(sensor))
 			{
-				sensingKit.registerSensor(sensor);
+				sensingKit.registerSensorModule(sensor);
 			}
-			if (!sensingKit.isSensorSensing(sensor))
+			if (!sensingKit.isSensorModuleSensing(sensor))
 			{
 				sensingKit.startContinuousSensingWithSensor(sensor);
 			}
@@ -266,22 +301,36 @@ public class SensingKit extends CordovaPlugin
 	private void startSensors(final Collection<String> sensors, final String url)
 	{
 		urlBase = url;
-		for (SKSensorType type : this.sensors.values())
+		for (SKSensorModuleType type : this.sensors)
 		{
 			try
 			{
-				if (sensingKit.isSensorSensing(type))
+				if (sensingKit.isSensorModuleSensing(type))
 				{
-					if (!sensors.contains(type.getName()))
+					if (!sensors.contains(getSensorName(type)))
 					{
-						logger.info("Stopping " + type.getName());
+						logger.info("Stopping " + getSensorName(type));
 						sensingKit.stopContinuousSensingWithSensor(type);
-						sensingKit.unsubscribeAllSensorDataListeners(type);
+						SensorListener listener = listeners.get(type);
+						if (listener != null)
+						{
+							sensingKit.unsubscribeSensorDataListener(type, listener);
+							try
+							{
+								listener.connection = false;
+								listener.queue.put("");
+							}
+							catch (InterruptedException e)
+							{
+								e.printStackTrace();
+							}
+							listeners.remove(type);
+						}
 					}
 				}
 				else
 				{
-					if (sensors.contains(type.getName()))
+					if (sensors.contains(getSensorName(type)))
 					{
 						startSensor(type);
 					}
@@ -305,7 +354,7 @@ public class SensingKit extends CordovaPlugin
 				{
 					try
 					{
-						startSensor(SKSensorType.LOCATION);
+						startSensor(SKSensorModuleType.LOCATION);
 					}
 					catch (Throwable e)
 					{
