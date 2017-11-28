@@ -21,6 +21,8 @@ package uk.ac.nott.mrl.sensingKit;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.http.SslCertificate;
@@ -31,6 +33,7 @@ import android.security.KeyChain;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebView;
 
@@ -53,7 +56,6 @@ import org.sensingkit.sensingkitlib.data.SKSensorData;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.charset.Charset;
-import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
@@ -226,17 +228,40 @@ public class SensingKit extends CordovaPlugin
 			.build();
 	private HttpUrl dataURL;
 	private CallbackContext callback;
+	private TrustManagerFactory trustManagerFactory;
 
-
-	private TrustManager[] getTrustManagers() throws GeneralSecurityException, IOException
+	private TrustManager[] getTrustManagers()
 	{
-		final KeyStore keyStore = KeyStore.getInstance("AndroidCAStore");
-		keyStore.load(null, null);
-		TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-		trustManagerFactory.init(keyStore);
+		if (trustManagerFactory == null)
+		{
+			createTrustManagerFactory();
+		}
 		return trustManagerFactory.getTrustManagers();
 	}
 
+	private void createTrustManagerFactory()
+	{
+		KeyStore keyStore = null;
+		try
+		{
+			keyStore = KeyStore.getInstance("AndroidCAStore");
+			keyStore.load(null, null);
+		}
+		catch (Exception e)
+		{
+			e.printStackTrace();
+		}
+
+		try
+		{
+			trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+			trustManagerFactory.init(keyStore);
+		}
+		catch (Exception e)
+		{
+			e.printStackTrace();
+		}
+	}
 
 	@Override
 	public void initialize(final CordovaInterface cordova, final CordovaWebView webView)
@@ -284,7 +309,8 @@ public class SensingKit extends CordovaPlugin
 						{
 							Log.e(TAG, "verify trustManager failed", e);
 						}
-						super.onReceivedSslError(view, handler, error);
+						handler.cancel();
+						//super.onReceivedSslError(view, handler, error);
 					}
 				});
 				webView.clearCache();
@@ -388,12 +414,49 @@ public class SensingKit extends CordovaPlugin
 			@Override
 			public void onResponse(final Call call, final Response response) throws IOException
 			{
-				final byte[] cert = response.body().bytes();
+				ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_Material_Light_Dialog);
+				final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
+				builder.setTitle("Install Certificate")
+						.setMessage("Databox requires you to install a certificate to be able to use it securely.")
+						.setPositiveButton("Install", new DialogInterface.OnClickListener()
+						{
+							public void onClick(DialogInterface dialog, int id)
+							{
+								try
+								{
+									final byte[] certBytes = response.body().bytes();
 
-				final Intent installIntent = KeyChain.createInstallIntent();
-				installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert);
-				installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
-				cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+									final Intent installIntent = KeyChain.createInstallIntent();
+									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
+									installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
+
+									// TODO Rel
+
+									cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+								}
+								catch (Exception e)
+								{
+									Log.i(TAG, e.getMessage(), e);
+								}
+							}
+						})
+						.setNegativeButton("Cancel", new DialogInterface.OnClickListener()
+						{
+							public void onClick(DialogInterface dialog, int id)
+							{
+								// User cancelled the dialog
+							}
+						});
+				// Create the AlertDialog object and return it#
+				cordova.getActivity().runOnUiThread(new Runnable()
+				{
+					@Override
+					public void run()
+					{
+						AlertDialog dialog = builder.create();
+						dialog.show();
+					}
+				});
 			}
 		});
 	}
@@ -478,6 +541,8 @@ public class SensingKit extends CordovaPlugin
 			switch (resultCode)
 			{
 				case Activity.RESULT_OK:
+					createTrustManagerFactory();
+
 					callback.success();
 					break;
 				default:
