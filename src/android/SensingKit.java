@@ -20,14 +20,27 @@
 package uk.ac.nott.mrl.sensingKit;
 
 import android.Manifest;
+import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.http.SslCertificate;
+import android.net.http.SslError;
+import android.os.Handler;
+import android.os.Looper;
+import android.security.KeyChain;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.util.Log;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebView;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CordovaWebView;
+import org.apache.cordova.engine.SystemWebView;
+import org.apache.cordova.engine.SystemWebViewClient;
+import org.apache.cordova.engine.SystemWebViewEngine;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.sensingkit.sensingkitlib.SKException;
@@ -38,7 +51,11 @@ import org.sensingkit.sensingkitlib.SensingKitLibInterface;
 import org.sensingkit.sensingkitlib.data.SKSensorData;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.charset.Charset;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -50,6 +67,10 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -104,8 +125,8 @@ public class SensingKit extends CordovaPlugin
 			{
 				if (!connection)
 				{
-					final HttpUrl url = HttpUrl.parse(urlBase).newBuilder()
-							.addPathSegment("ui")
+					final HttpUrl url = dataURL.newBuilder()
+							//.addPathSegment("ui")
 							.addPathSegment(getSensorName(sensorType))
 							.addPathSegment("data").build();
 
@@ -192,7 +213,9 @@ public class SensingKit extends CordovaPlugin
 		}
 	}
 
+	private static final String TAG = SensingKit.class.getSimpleName();
 	private static final int LOCATION_PERMISSION = 387;
+	private static final int INSTALL_KEYCHAIN_CODE = 692;
 	private static final Logger logger = Logger.getLogger(uk.ac.nott.mrl.sensingKit.SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
 	private final Collection<SKSensorModuleType> sensors = new HashSet<SKSensorModuleType>();
@@ -201,16 +224,79 @@ public class SensingKit extends CordovaPlugin
 			.readTimeout(0, TimeUnit.MINUTES)
 			.writeTimeout(0, TimeUnit.MINUTES)
 			.build();
-	private String urlBase;
+	private HttpUrl dataURL;
+	private CallbackContext callback;
+
+
+	private TrustManager[] getTrustManagers() throws GeneralSecurityException, IOException
+	{
+		final KeyStore keyStore = KeyStore.getInstance("AndroidCAStore");
+		keyStore.load(null, null);
+		TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+		trustManagerFactory.init(keyStore);
+		return trustManagerFactory.getTrustManagers();
+	}
+
 
 	@Override
 	public void initialize(final CordovaInterface cordova, final CordovaWebView webView)
 	{
 		super.initialize(cordova, webView);
+
+		Log.i(TAG, "Setting SystemWebViewClient");
+		new Handler(Looper.getMainLooper()).post(new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				final SystemWebView view = (SystemWebView) webView.getView();
+				view.setWebViewClient(new SystemWebViewClient((SystemWebViewEngine) webView.getEngine())
+				{
+					@Override
+					public void onReceivedSslError(final WebView view, final SslErrorHandler handler, final SslError error)
+					{
+						try
+						{
+							Log.i(TAG, "SSL Error " + error.getUrl());
+							final SslCertificate cert = error.getCertificate();
+							final Field field = cert.getClass().getDeclaredField("mX509Certificate");
+							field.setAccessible(true);
+							final X509Certificate[] chain = {(X509Certificate) field.get(cert)};
+							for (TrustManager trustManager : getTrustManagers())
+							{
+								if (trustManager instanceof X509TrustManager)
+								{
+									final X509TrustManager x509TrustManager = (X509TrustManager) trustManager;
+									try
+									{
+										x509TrustManager.checkServerTrusted(chain, "generic");
+										handler.proceed();
+										return;
+									}
+									catch (Exception e)
+									{
+										Log.e(TAG, "verify trustManager failed", e);
+									}
+								}
+							}
+						}
+						catch (Exception e)
+						{
+							Log.e(TAG, "verify trustManager failed", e);
+						}
+						super.onReceivedSslError(view, handler, error);
+					}
+				});
+				webView.clearCache();
+				view.reload();
+				Log.i(TAG, "Setting SystemWebViewClient2");
+			}
+		});
+
 		try
 		{
 			sensingKit = SensingKitLib.getSensingKitLib(cordova.getActivity());
-			for (SKSensorModuleType sensorType : SKSensorModuleType.values())
+			for (final SKSensorModuleType sensorType : SKSensorModuleType.values())
 			{
 				try
 				{
@@ -238,7 +324,12 @@ public class SensingKit extends CordovaPlugin
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException
 	{
-		if (action.equals("stop"))
+		if (action.equals("installCert"))
+		{
+			installCert(args.getString(0), callbackContext);
+			return true;
+		}
+		else if (action.equals("stop"))
 		{
 			stopSensing();
 			callbackContext.success();
@@ -247,7 +338,7 @@ public class SensingKit extends CordovaPlugin
 		else if (action.equals("listSensors"))
 		{
 			final JSONArray array = new JSONArray();
-			for (SKSensorModuleType sensor : sensors)
+			for (final SKSensorModuleType sensor : sensors)
 			{
 				array.put(getSensorName(sensor));
 			}
@@ -263,11 +354,48 @@ public class SensingKit extends CordovaPlugin
 				sensors.add(array.getString(index));
 			}
 
-			startSensors(sensors, args.getString(1));
+			startSensors(sensors);
 			callbackContext.success();
 			return true;
 		}
 		return false;
+	}
+
+	private void installCert(final String urlBase, final CallbackContext callbackContext)
+	{
+		final HttpUrl certUrl = HttpUrl.parse(urlBase)
+				.newBuilder()
+				.scheme("http")
+				.port(8448)
+				.addPathSegment("cert")
+				.build();
+
+		Log.i("SensingKit", certUrl.toString());
+
+		final Request certRequest = new Request.Builder()
+				.url(certUrl)
+				.build();
+
+		callback = callbackContext;
+		client.newCall(certRequest).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(final Call call, final IOException e)
+			{
+				callbackContext.error(e.getMessage());
+			}
+
+			@Override
+			public void onResponse(final Call call, final Response response) throws IOException
+			{
+				final byte[] cert = response.body().bytes();
+
+				final Intent installIntent = KeyChain.createInstallIntent();
+				installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert);
+				installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
+				cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+			}
+		});
 	}
 
 	private void startSensor(final SKSensorModuleType sensor) throws SKException
@@ -279,7 +407,7 @@ public class SensingKit extends CordovaPlugin
 		}
 		else
 		{
-			SensorListener listener = new SensorListener();
+			final SensorListener listener = new SensorListener();
 			sensingKit.subscribeSensorDataListener(sensor, listener);
 			listeners.put(sensor, listener);
 			if (!sensingKit.isSensorModuleRegistered(sensor))
@@ -295,13 +423,12 @@ public class SensingKit extends CordovaPlugin
 
 	private void stopSensing()
 	{
-		startSensors(Collections.<String>emptySet(), urlBase);
+		startSensors(Collections.<String>emptySet());
 	}
 
-	private void startSensors(final Collection<String> sensors, final String url)
+	private void startSensors(final Collection<String> sensors)
 	{
-		urlBase = url;
-		for (SKSensorModuleType type : this.sensors)
+		for (final SKSensorModuleType type : this.sensors)
 		{
 			try
 			{
@@ -311,7 +438,7 @@ public class SensingKit extends CordovaPlugin
 					{
 						logger.info("Stopping " + getSensorName(type));
 						sensingKit.stopContinuousSensingWithSensor(type);
-						SensorListener listener = listeners.get(type);
+						final SensorListener listener = listeners.get(type);
 						if (listener != null)
 						{
 							sensingKit.unsubscribeSensorDataListener(type, listener);
@@ -338,8 +465,28 @@ public class SensingKit extends CordovaPlugin
 			}
 			catch (SKException e)
 			{
-				e.printStackTrace();
+				logger.log(Level.WARNING, e.getMessage(), e);
 			}
+		}
+	}
+
+	@Override
+	public void onActivityResult(final int requestCode, final int resultCode, final Intent intent)
+	{
+		if (requestCode == INSTALL_KEYCHAIN_CODE)
+		{
+			switch (resultCode)
+			{
+				case Activity.RESULT_OK:
+					callback.success();
+					break;
+				default:
+					super.onActivityResult(requestCode, resultCode, intent);
+			}
+		}
+		else
+		{
+			super.onActivityResult(requestCode, resultCode, intent);
 		}
 	}
 

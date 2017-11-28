@@ -19,6 +19,7 @@
 		<config-file parent="/*" target="res/xml/config.xml">
 			<feature name="SensingKit">
 				<param name="android-package" value="uk.ac.nott.mrl.sensingKit.SensingKit" />
+				<param name="onload" value="true" />
 			</feature>
 		</config-file>
 		<framework src="org.nanohttpd:nanohttpd-webserver:2.3.1" />
