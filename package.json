@@ -1,9 +1,9 @@
 {
-  "name": "artcodes-scanner",
-  "version": "0.1.0",
-  "description": "Simple plugin that returns your string prefixed with hello.",
+  "name": "cordova-plugin-sensingKit",
+  "version": "0.2.0",
+  "description": "Databox support plugin for cordova",
   "cordova": {
-    "id": "artcodes-scanner",
+    "id": "cordova-plugin-sensingKit",
     "platforms": [
       "android"
     ]
