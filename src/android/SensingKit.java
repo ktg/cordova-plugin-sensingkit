@@ -373,6 +373,8 @@ public class SensingKit extends CordovaPlugin
 		}
 		else if (action.equals("startSensors"))
 		{
+			dataURL = HttpUrl.parse(args.getString(1)).newBuilder().addPathSegment("ui").build();
+
 			final JSONArray array = args.getJSONArray(0);
 			final Set<String> sensors = new HashSet<String>();
 			for (int index = 0; index < array.length(); index++)
