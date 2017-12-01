@@ -393,7 +393,7 @@ public class SensingKit extends CordovaPlugin
 				.newBuilder()
 				.scheme("http")
 				.port(8448)
-				.addPathSegment("cert")
+				.addPathSegment("cert.pem")
 				.build();
 
 		Log.i("SensingKit", certUrl.toString());
