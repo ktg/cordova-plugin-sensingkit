@@ -70,6 +70,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
@@ -222,7 +224,7 @@ public class SensingKit extends CordovaPlugin
 	private SensingKitLibInterface sensingKit;
 	private final Collection<SKSensorModuleType> sensors = new HashSet<SKSensorModuleType>();
 	private final Map<SKSensorModuleType, SensorListener> listeners = new HashMap<SKSensorModuleType, SensorListener>();
-	private static final OkHttpClient client = new OkHttpClient.Builder()
+	private OkHttpClient client = new OkHttpClient.Builder()
 			.readTimeout(0, TimeUnit.MINUTES)
 			.writeTimeout(0, TimeUnit.MINUTES)
 			.build();
@@ -256,6 +258,28 @@ public class SensingKit extends CordovaPlugin
 		{
 			trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
 			trustManagerFactory.init(keyStore);
+
+			X509TrustManager trustManager = null;
+			for(TrustManager manager: trustManagerFactory.getTrustManagers()) {
+				if(manager instanceof X509TrustManager)
+				{
+					trustManager = (X509TrustManager)manager;
+					break;
+				}
+			}
+
+			final OkHttpClient.Builder builder = new OkHttpClient.Builder()
+				.readTimeout(0, TimeUnit.MINUTES)
+				.writeTimeout(0, TimeUnit.MINUTES);
+
+			if(trustManager != null)
+			{
+				final SSLContext sslContext = SSLContext.getInstance("TLS");
+				sslContext.init(null, new TrustManager[] { trustManager }, null);
+
+				builder.sslSocketFactory(sslContext.getSocketFactory(), trustManager);
+				client = builder.build();
+			}
 		}
 		catch (Exception e)
 		{
