@@ -53,10 +53,13 @@ import org.sensingkit.sensingkitlib.SensingKitLib;
 import org.sensingkit.sensingkitlib.SensingKitLibInterface;
 import org.sensingkit.sensingkitlib.data.SKSensorData;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.charset.Charset;
 import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.Collections;
@@ -70,7 +73,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
@@ -222,6 +224,7 @@ public class SensingKit extends CordovaPlugin
 	private static final int INSTALL_KEYCHAIN_CODE = 692;
 	private static final Logger logger = Logger.getLogger(uk.ac.nott.mrl.sensingKit.SensingKit.class.getSimpleName());
 	private SensingKitLibInterface sensingKit;
+	private Certificate cert;
 	private final Collection<SKSensorModuleType> sensors = new HashSet<SKSensorModuleType>();
 	private final Map<SKSensorModuleType, SensorListener> listeners = new HashMap<SKSensorModuleType, SensorListener>();
 	private OkHttpClient client = new OkHttpClient.Builder()
@@ -248,6 +251,10 @@ public class SensingKit extends CordovaPlugin
 		{
 			keyStore = KeyStore.getInstance("AndroidCAStore");
 			keyStore.load(null, null);
+			if(cert != null)
+			{
+				keyStore.setCertificateEntry("databox", cert);
+			}
 		}
 		catch (Exception e)
 		{
@@ -260,22 +267,23 @@ public class SensingKit extends CordovaPlugin
 			trustManagerFactory.init(keyStore);
 
 			X509TrustManager trustManager = null;
-			for(TrustManager manager: trustManagerFactory.getTrustManagers()) {
-				if(manager instanceof X509TrustManager)
+			for (TrustManager manager : trustManagerFactory.getTrustManagers())
+			{
+				if (manager instanceof X509TrustManager)
 				{
-					trustManager = (X509TrustManager)manager;
+					trustManager = (X509TrustManager) manager;
 					break;
 				}
 			}
 
 			final OkHttpClient.Builder builder = new OkHttpClient.Builder()
-				.readTimeout(0, TimeUnit.MINUTES)
-				.writeTimeout(0, TimeUnit.MINUTES);
+					.readTimeout(0, TimeUnit.MINUTES)
+					.writeTimeout(0, TimeUnit.MINUTES);
 
-			if(trustManager != null)
+			if (trustManager != null)
 			{
 				final SSLContext sslContext = SSLContext.getInstance("TLS");
-				sslContext.init(null, new TrustManager[] { trustManager }, null);
+				sslContext.init(null, new TrustManager[]{trustManager}, null);
 
 				builder.sslSocketFactory(sslContext.getSocketFactory(), trustManager);
 				client = builder.build();
@@ -440,7 +448,7 @@ public class SensingKit extends CordovaPlugin
 			@Override
 			public void onResponse(final Call call, final Response response) throws IOException
 			{
-				ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_Material_Light_Dialog);
+				ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
 				final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
 				builder.setTitle("Install Certificate")
 						.setMessage("Databox requires you to install a certificate to be able to use it securely.")
@@ -451,6 +459,9 @@ public class SensingKit extends CordovaPlugin
 								try
 								{
 									final byte[] certBytes = response.body().bytes();
+
+									CertificateFactory fact = CertificateFactory.getInstance("X.509");
+									cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
 
 									final Intent installIntent = KeyChain.createInstallIntent();
 									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
