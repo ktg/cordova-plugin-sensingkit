@@ -22,8 +22,11 @@ package uk.ac.nott.mrl.sensingKit;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.net.http.SslCertificate;
 import android.net.http.SslError;
@@ -63,6 +66,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -219,6 +223,16 @@ public class SensingKit extends CordovaPlugin
 		}
 	}
 
+	private class KeyChainBroadcastReceiver extends BroadcastReceiver
+	{
+
+		@Override
+		public void onReceive(final Context context, final Intent intent)
+		{
+			trustManager = null;
+		}
+	}
+
 	private static final String TAG = SensingKit.class.getSimpleName();
 	private static final int LOCATION_PERMISSION = 387;
 	private static final int INSTALL_KEYCHAIN_CODE = 692;
@@ -233,27 +247,37 @@ public class SensingKit extends CordovaPlugin
 			.build();
 	private HttpUrl dataURL;
 	private CallbackContext callback;
-	private TrustManagerFactory trustManagerFactory;
+	private X509TrustManager trustManager;
 
-	private TrustManager[] getTrustManagers()
+	private X509TrustManager getTrustManager()
 	{
-		if (trustManagerFactory == null)
+		if (trustManager == null)
 		{
-			createTrustManagerFactory();
+			createTrustManager();
 		}
-		return trustManagerFactory.getTrustManagers();
+		return trustManager;
 	}
 
-	private void createTrustManagerFactory()
+	private void createTrustManager()
 	{
 		KeyStore keyStore = null;
 		try
 		{
-			keyStore = KeyStore.getInstance("AndroidCAStore");
+			keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
 			keyStore.load(null, null);
-			if(cert != null)
+			KeyStore systemKeyStore = KeyStore.getInstance("AndroidCAStore");
+			systemKeyStore.load(null, null);
+			Enumeration<String> aliases = systemKeyStore.aliases();
+			while (aliases.hasMoreElements())
 			{
-				keyStore.setCertificateEntry("databox", cert);
+				String alias = aliases.nextElement();
+				Certificate certificate = systemKeyStore.getCertificate(alias);
+				keyStore.setCertificateEntry(alias, certificate);
+
+			}
+			if (cert != null)
+			{
+				keyStore.setCertificateEntry("Databox", cert);
 			}
 		}
 		catch (Exception e)
@@ -263,10 +287,9 @@ public class SensingKit extends CordovaPlugin
 
 		try
 		{
-			trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+			TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
 			trustManagerFactory.init(keyStore);
 
-			X509TrustManager trustManager = null;
 			for (TrustManager manager : trustManagerFactory.getTrustManagers())
 			{
 				if (manager instanceof X509TrustManager)
@@ -319,30 +342,15 @@ public class SensingKit extends CordovaPlugin
 							final Field field = cert.getClass().getDeclaredField("mX509Certificate");
 							field.setAccessible(true);
 							final X509Certificate[] chain = {(X509Certificate) field.get(cert)};
-							for (TrustManager trustManager : getTrustManagers())
-							{
-								if (trustManager instanceof X509TrustManager)
-								{
-									final X509TrustManager x509TrustManager = (X509TrustManager) trustManager;
-									try
-									{
-										x509TrustManager.checkServerTrusted(chain, "generic");
-										handler.proceed();
-										return;
-									}
-									catch (Exception e)
-									{
-										Log.e(TAG, "verify trustManager failed", e);
-									}
-								}
-							}
+							final X509TrustManager x509TrustManager = getTrustManager();
+							x509TrustManager.checkServerTrusted(chain, "generic");
+							handler.proceed();
 						}
 						catch (Exception e)
 						{
 							Log.e(TAG, "verify trustManager failed", e);
+							handler.cancel();
 						}
-						handler.cancel();
-						//super.onReceivedSslError(view, handler, error);
 					}
 				});
 				webView.clearCache();
@@ -376,6 +384,15 @@ public class SensingKit extends CordovaPlugin
 		catch (SKException e)
 		{
 			logger.log(Level.SEVERE, e.getMessage(), e);
+		}
+
+		if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+		{
+			IntentFilter intentFilter = new IntentFilter(KeyChain.ACTION_KEYCHAIN_CHANGED);
+			IntentFilter intentFilter2 = new IntentFilter(KeyChain.ACTION_TRUST_STORE_CHANGED);
+			KeyChainBroadcastReceiver receiver = new KeyChainBroadcastReceiver();
+			cordova.getActivity().registerReceiver(receiver, intentFilter);
+			cordova.getActivity().registerReceiver(receiver, intentFilter2);
 		}
 	}
 
@@ -466,8 +483,6 @@ public class SensingKit extends CordovaPlugin
 									final Intent installIntent = KeyChain.createInstallIntent();
 									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
 									installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
-
-									// TODO Rel
 
 									cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
 								}
@@ -578,7 +593,7 @@ public class SensingKit extends CordovaPlugin
 			switch (resultCode)
 			{
 				case Activity.RESULT_OK:
-					createTrustManagerFactory();
+					createTrustManager();
 
 					callback.success();
 					break;

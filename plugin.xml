@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<plugin id="cordova-plugin-sensingKit" version="0.2.4"
+<plugin id="cordova-plugin-sensingKit" version="0.2.5"
 	xmlns="http://apache.org/cordova/ns/plugins/1.0">
 	<name>SensingKit</name>
 	<author>Kevin Glover</author>
@@ -22,8 +22,8 @@
 				<param name="onload" value="true" />
 			</feature>
 		</config-file>
-		<framework src="com.google.android.gms:play-services-location:11.0.1" />
-		<framework src="com.squareup.okhttp3:okhttp:3.9.0" />
+		<framework src="com.google.android.gms:play-services-location:11.6.2" />
+		<framework src="com.squareup.okhttp3:okhttp:3.9.1" />
 		<framework src="org.altbeacon:android-beacon-library:2.12.2"/>
 		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
 
