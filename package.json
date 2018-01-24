@@ -1,6 +1,6 @@
 {
   "name": "cordova-plugin-sensingKit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Databox support plugin for cordova",
   "cordova": {
     "id": "cordova-plugin-sensingKit",
