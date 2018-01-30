@@ -259,7 +259,6 @@ public class SensingKit extends CordovaPlugin
 
 	private void createTrustManager()
 	{
-		Log.i(TAG, "Create Trust Manager");
 		KeyStore keyStore = null;
 		try
 		{
@@ -277,7 +276,6 @@ public class SensingKit extends CordovaPlugin
 			}
 			if (cert != null)
 			{
-				Log.i(TAG, "Include Databox cert");
 				keyStore.setCertificateEntry("Databox", cert);
 			}
 		}
@@ -289,7 +287,6 @@ public class SensingKit extends CordovaPlugin
 		try
 		{
 			final TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-			Log.i(TAG, "Keystore = " + keyStore);
 			trustManagerFactory.init(keyStore);
 
 			for (TrustManager manager : trustManagerFactory.getTrustManagers())
@@ -325,7 +322,6 @@ public class SensingKit extends CordovaPlugin
 	{
 		super.initialize(cordova, webView);
 
-		Log.i(TAG, "Setting SystemWebViewClient");
 		new Handler(Looper.getMainLooper()).post(() -> {
 			final SystemWebView view = (SystemWebView) webView.getView();
 			view.setWebViewClient(new SystemWebViewClient((SystemWebViewEngine) webView.getEngine())
@@ -335,25 +331,24 @@ public class SensingKit extends CordovaPlugin
 				{
 					try
 					{
-						Log.i(TAG, "SSL Error " + error.getUrl());
 						final SslCertificate cert = error.getCertificate();
 						final Field field = cert.getClass().getDeclaredField("mX509Certificate");
 						field.setAccessible(true);
 						final X509Certificate[] chain = {(X509Certificate) field.get(cert)};
 						final X509TrustManager x509TrustManager = getTrustManager();
 						x509TrustManager.checkServerTrusted(chain, "generic");
+						Log.i(TAG, "Cert OK");
 						handler.proceed();
 					}
 					catch (Exception e)
 					{
-						Log.e(TAG, "verify trustManager failed", e);
+						Log.e(TAG, "SSL Error: " + error.getUrl(), e);
 						handler.cancel();
 					}
 				}
 			});
 			webView.clearCache();
 			view.reload();
-			Log.i(TAG, "Setting SystemWebViewClient2");
 		});
 
 		try
@@ -436,63 +431,67 @@ public class SensingKit extends CordovaPlugin
 
 	private void installCert(final String urlBase, final CallbackContext callbackContext)
 	{
-		final HttpUrl certUrl = HttpUrl.parse(urlBase)
-				.newBuilder()
-				.scheme("http")
-				.addPathSegment("cert.pem")
-				.build();
-
-		Log.i("SensingKit", certUrl.toString());
-
-		final Request certRequest = new Request.Builder()
-				.url(certUrl)
-				.build();
-
-		callback = callbackContext;
-		client.newCall(certRequest).enqueue(new Callback()
+		if (cert == null)
 		{
-			@Override
-			public void onFailure(final Call call, final IOException e)
+			Log.i(TAG, urlBase);
+			final HttpUrl certUrl = HttpUrl.parse(urlBase)
+					.newBuilder()
+					.scheme("http")
+					.addPathSegment("cert.pem")
+					.build();
+
+			final Request certRequest = new Request.Builder()
+					.url(certUrl)
+					.build();
+
+			callback = callbackContext;
+			client.newCall(certRequest).enqueue(new Callback()
 			{
-				callbackContext.error(e.getMessage());
-			}
+				@Override
+				public void onFailure(final Call call, final IOException e)
+				{
+					callbackContext.error(e.getMessage());
+				}
 
-			@Override
-			public void onResponse(final Call call, final Response response)
-			{
-				ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
-				final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
-				builder.setTitle("Install Certificate")
-						.setMessage("Databox requires you to install a certificate to be able to use it securely.")
-						.setPositiveButton("Install", (dialog, id) -> {
-							try
-							{
-								final byte[] certBytes = response.body().bytes();
+				@Override
+				public void onResponse(final Call call, final Response response)
+				{
+					ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
+					final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
+					builder.setTitle("Install Certificate")
+							.setMessage("Databox requires you to install a certificate to be able to use it securely.")
+							.setPositiveButton("Install", (dialog, id) -> {
+								try
+								{
+									final byte[] certBytes = response.body().bytes();
 
-								CertificateFactory fact = CertificateFactory.getInstance("X.509");
-								cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
+									CertificateFactory fact = CertificateFactory.getInstance("X.509");
+									cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
 
-								final Intent installIntent = KeyChain.createInstallIntent();
-								installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
-								installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
+									final Intent installIntent = KeyChain.createInstallIntent();
+									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
+									installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
 
-								cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
-							}
-							catch (Exception e)
-							{
-								Log.i(TAG, e.getMessage(), e);
-							}
-						})
-						.setNegativeButton("Cancel", (dialog, id) -> {
-							// User cancelled the dialog
-						});
-				// Create the AlertDialog object and return it#
-				cordova.getActivity().runOnUiThread(() -> {
-					AlertDialog dialog = builder.create();
-					dialog.show();
-				});
-			}
-		});
+									cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+								}
+								catch (Exception e)
+								{
+									Log.i(TAG, e.getMessage(), e);
+								}
+							})
+							.setNegativeButton("Cancel", (dialog, id) -> callbackContext.error("Refuesed Cert"));
+					// Create the AlertDialog object and return it#
+					cordova.getActivity().runOnUiThread(() -> {
+						AlertDialog dialog = builder.create();
+						dialog.show();
+					});
+				}
+			});
+		}
+		else
+		{
+			callbackContext.error("Cert exists");
+		}
 	}
 
 	private void startSensor(final SKSensorModuleType sensor) throws SKException
@@ -578,9 +577,10 @@ public class SensingKit extends CordovaPlugin
 					createTrustManager();
 
 					callback.success();
+
 					break;
 				default:
-					super.onActivityResult(requestCode, resultCode, intent);
+					callback.error("Refused Cert");
 			}
 		}
 		else
