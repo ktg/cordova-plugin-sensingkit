@@ -45,8 +45,8 @@
 		</config-file>
 		<config-file target="*-Info.plist" parent="NSMotionUsageDescription">
 			<string>Motion data sent to Databox</string>
-		</config-file>
-		<dependency id="cordova-plugin-swift-support" spec="~3.1.1" />
+		</config-file>    
+		<dependency id="cordova-plugin-add-swift-support" spec="~1.7.1" />
 		<framework src="SensingKit" type="podspec" spec="" />
 		<source-file src="src/ios/SensingKit.swift" />
 		<header-file src="src/ios/SensingKit-Bridging-Header.h"/>
