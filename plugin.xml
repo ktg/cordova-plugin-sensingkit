@@ -22,8 +22,8 @@
 				<param name="onload" value="true" />
 			</feature>
 		</config-file>
-		<framework src="com.google.android.gms:play-services-location:11.6.2" />
-		<framework src="com.squareup.okhttp3:okhttp:3.9.1" />
+		<framework src="com.google.android.gms:play-services-location:12.0.1" />
+		<framework src="com.squareup.okhttp3:okhttp:3.10.0" />
 		<framework src="org.altbeacon:android-beacon-library:2.12.2"/>
 		<framework src="src/android/sensingKit.gradle" custom="true" type="gradleReference" />
 
@@ -49,6 +49,7 @@
 		</config-file>    
 		<dependency id="cordova-plugin-add-swift-support" spec="~1.7.1" />
 		<framework src="SensingKit" type="podspec" spec="" />
+		<source-file src="src/ios/DataboxURLProtocol.swift" />
 		<source-file src="src/ios/SensingKit.swift" />
 		<header-file src="src/ios/SensingKit-Bridging-Header.h"/>
 	</platform>
