@@ -456,35 +456,41 @@ public class SensingKit extends CordovaPlugin
 				@Override
 				public void onResponse(final Call call, final Response response)
 				{
-					ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
-					final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
-					builder.setTitle("Install Certificate")
-							.setMessage("Databox requires you to install a certificate to be able to use it securely.")
-							.setPositiveButton("Install", (dialog, id) -> {
-								try
-								{
-									final byte[] certBytes = response.body().bytes();
+					try
+					{
+						final byte[] certBytes = response.body().bytes();
+						final ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
+						final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
+						builder.setTitle("Install Certificate")
+								.setMessage("Databox requires you to install a certificate to be able to use it securely.")
+								.setPositiveButton("Install", (dialog, id) -> {
+									try
+									{
+										CertificateFactory fact = CertificateFactory.getInstance("X.509");
+										cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
 
-									CertificateFactory fact = CertificateFactory.getInstance("X.509");
-									cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
+										final Intent installIntent = KeyChain.createInstallIntent();
+										installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
+										installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
 
-									final Intent installIntent = KeyChain.createInstallIntent();
-									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
-									installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
-
-									cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
-								}
-								catch (Exception e)
-								{
-									Log.i(TAG, e.getMessage(), e);
-								}
-							})
-							.setNegativeButton("Cancel", (dialog, id) -> callbackContext.error("Refuesed Cert"));
-					// Create the AlertDialog object and return it#
-					cordova.getActivity().runOnUiThread(() -> {
-						AlertDialog dialog = builder.create();
-						dialog.show();
-					});
+										cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+									}
+									catch (Exception e)
+									{
+										Log.i(TAG, e.getMessage(), e);
+									}
+								})
+								.setNegativeButton("Cancel", (dialog, id) -> callbackContext.error("Refuesed Cert"));
+						// Create the AlertDialog object and return it#
+						cordova.getActivity().runOnUiThread(() -> {
+							AlertDialog dialog = builder.create();
+							dialog.show();
+						});
+					}
+					catch (Exception e)
+					{
+						Log.i(TAG, e.getMessage(), e);
+					}
 				}
 			});
 		}
