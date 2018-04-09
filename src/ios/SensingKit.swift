@@ -1,3 +1,5 @@
+import UIKit
+
 class Sensor {
 	let type: SKSensorType
 	let name: String
@@ -14,6 +16,8 @@ class Sensor {
 	var sensors: [SKSensorType: Sensor] = [:]
 
 	override func pluginInitialize() {
+		URLProtocol.registerClass(DataboxURLProtocol.self)
+
 		sensingKit = SensingKitLib.shared()
 		sensors = [:]
 		let sensorList = [Sensor("Accelerometer", .Accelerometer),
@@ -50,6 +54,12 @@ class Sensor {
 			return next
 		}
 	}
+
+	@objc(installCert:)
+	func installCert(command: CDVInvokedUrlCommand) {
+		commandDelegate!.send(CDVPluginResult(status: CDVCommandStatus_ERROR), callbackId: command.callbackId)
+	}
+
 
 	@objc(listSensors:)
 	func listSensors(command: CDVInvokedUrlCommand) {
