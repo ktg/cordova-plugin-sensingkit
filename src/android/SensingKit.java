@@ -27,6 +27,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.net.http.SslCertificate;
 import android.net.http.SslError;
 import android.os.Handler;
@@ -36,9 +37,11 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
+import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebView;
-
+import okhttp3.*;
+import okio.BufferedSink;
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
@@ -48,48 +51,28 @@ import org.apache.cordova.engine.SystemWebViewClient;
 import org.apache.cordova.engine.SystemWebViewEngine;
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.sensingkit.sensingkitlib.SKException;
-import org.sensingkit.sensingkitlib.SKSensorDataListener;
-import org.sensingkit.sensingkitlib.SKSensorModuleType;
-import org.sensingkit.sensingkitlib.SensingKitLib;
-import org.sensingkit.sensingkitlib.SensingKitLibInterface;
+import org.sensingkit.sensingkitlib.*;
 import org.sensingkit.sensingkitlib.data.SKSensorData;
-
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.lang.reflect.Field;
-import java.nio.charset.Charset;
-import java.security.KeyStore;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateFactory;
-import java.security.cert.X509Certificate;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
-
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.HttpUrl;
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-import okio.BufferedSink;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.nio.charset.Charset;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class SensingKit extends CordovaPlugin
 {
@@ -139,8 +122,6 @@ public class SensingKit extends CordovaPlugin
 							.addPathSegment(getSensorName(sensorType))
 							.addPathSegment("data").build();
 
-					logger.info(url.toString());
-
 					final RequestBody requestBody = new RequestBody()
 					{
 						@Override
@@ -152,6 +133,7 @@ public class SensingKit extends CordovaPlugin
 						@Override
 						public void writeTo(BufferedSink sink)
 						{
+							logger.info("Started writing " + getSensorName(sensorType));
 							while (connection)
 							{
 								try
@@ -165,10 +147,11 @@ public class SensingKit extends CordovaPlugin
 								}
 								catch (Exception e)
 								{
-									e.printStackTrace();
+									connection = false;
+									logger.warning(e.getMessage());
 								}
 							}
-							logger.info("Finished " + getSensorName(sensorType));
+							logger.info("Finished writing " + getSensorName(sensorType));
 						}
 					};
 
@@ -245,7 +228,7 @@ public class SensingKit extends CordovaPlugin
 			.writeTimeout(0, TimeUnit.MINUTES)
 			.build();
 	private HttpUrl dataURL;
-	private CallbackContext callback;
+	private SslErrorHandler sslHandler = null;
 	private X509TrustManager trustManager;
 
 	private X509TrustManager getTrustManager()
@@ -298,23 +281,85 @@ public class SensingKit extends CordovaPlugin
 				}
 			}
 
-			final OkHttpClient.Builder builder = new OkHttpClient.Builder()
-					.readTimeout(0, TimeUnit.MINUTES)
-					.writeTimeout(0, TimeUnit.MINUTES);
-
-			if (trustManager != null)
-			{
-				final SSLContext sslContext = SSLContext.getInstance("TLS");
-				sslContext.init(null, new TrustManager[]{trustManager}, null);
-
-				builder.sslSocketFactory(sslContext.getSocketFactory(), trustManager);
-				client = builder.build();
-			}
+			createHttpClient();
 		}
 		catch (Exception e)
 		{
 			e.printStackTrace();
 		}
+	}
+
+	private void createHttpClient() throws GeneralSecurityException
+	{
+		final OkHttpClient.Builder builder = new OkHttpClient.Builder()
+				.readTimeout(0, TimeUnit.MINUTES)
+				.writeTimeout(0, TimeUnit.MINUTES);
+
+		if (trustManager != null)
+		{
+			final SSLContext sslContext = SSLContext.getInstance("TLS");
+			sslContext.init(null, new TrustManager[]{trustManager}, null);
+
+			builder.sslSocketFactory(sslContext.getSocketFactory(), trustManager);
+		}
+//		if (dataURL != null)
+//		{
+//			try
+//			{
+//				KeyStore keyStore = KeyStore.getInstance("AndroidCAStore");
+//				keyStore.load(null, null);
+//				final String key = keyStore.getCertificate("Databox").getPublicKey().toString();
+//				builder.certificatePinner(new CertificatePinner.Builder()
+//						.add(dataURL.host(), key)
+//						.build());
+//			}
+//			catch (Exception e)
+//			{
+//				e.printStackTrace();
+//			}
+//		}
+		// TODO !!!
+		builder.hostnameVerifier((hostname, session) -> true);
+		builder.cookieJar(new CookieJar()
+		{
+			private final CookieManager cookieManager = CookieManager.getInstance();
+
+			@Override
+			public void saveFromResponse(HttpUrl url, List<Cookie> cookies)
+			{
+				String urlString = url.toString();
+
+				for (Cookie cookie : cookies)
+				{
+					cookieManager.setCookie(urlString, cookie.toString());
+				}
+			}
+
+			@Override
+			public List<Cookie> loadForRequest(HttpUrl url)
+			{
+				String urlString = url.toString();
+				String cookiesString = cookieManager.getCookie(urlString);
+
+				if (cookiesString != null && !cookiesString.isEmpty())
+				{
+					//We can split on the ';' char as the cookie manager only returns cookies
+					//that match the url and haven't expired, so the cookie attributes aren't included
+					String[] cookieHeaders = cookiesString.split(";");
+					List<Cookie> cookies = new ArrayList<>(cookieHeaders.length);
+
+					for (String header : cookieHeaders)
+					{
+						cookies.add(Cookie.parse(url, header));
+					}
+
+					return cookies;
+				}
+
+				return Collections.emptyList();
+			}
+		});
+		client = builder.build();
 	}
 
 	@Override
@@ -342,6 +387,12 @@ public class SensingKit extends CordovaPlugin
 					}
 					catch (Exception e)
 					{
+						if (cert == null && error.getUrl().endsWith("/api/connect"))
+						{
+							sslHandler = handler;
+							final Uri uri = Uri.parse(error.getUrl());
+							installCert("http://" + uri.getHost());
+						}
 						Log.e(TAG, "SSL Error: " + error.getUrl(), e);
 						handler.cancel();
 					}
@@ -393,9 +444,6 @@ public class SensingKit extends CordovaPlugin
 	{
 		switch (action)
 		{
-			case "installCert":
-				installCert(args.getString(0), callbackContext);
-				return true;
 			case "stop":
 				stopSensing();
 				callbackContext.success();
@@ -413,6 +461,14 @@ public class SensingKit extends CordovaPlugin
 			case "startSensors":
 			{
 				dataURL = HttpUrl.parse(args.getString(1)).newBuilder().addPathSegment("ui").build();
+				try
+				{
+					createHttpClient();
+				}
+				catch (Exception e)
+				{
+					e.printStackTrace();
+				}
 
 				final JSONArray array = args.getJSONArray(0);
 				final Set<String> sensors = new HashSet<>();
@@ -429,80 +485,72 @@ public class SensingKit extends CordovaPlugin
 		return false;
 	}
 
-	private void installCert(final String urlBase, final CallbackContext callbackContext)
+	private void installCert(final String urlBase)
 	{
-		if (cert == null)
+		Log.i(TAG, urlBase);
+		final HttpUrl certUrl = HttpUrl.parse(urlBase)
+				.newBuilder()
+				.addPathSegment("cert.pem")
+				.build();
+
+		final Request certRequest = new Request.Builder()
+				.url(certUrl)
+				.build();
+
+		client.newCall(certRequest).enqueue(new Callback()
 		{
-			Log.i(TAG, urlBase);
-			final HttpUrl certUrl = HttpUrl.parse(urlBase)
-					.newBuilder()
-					.scheme("http")
-					.addPathSegment("cert.pem")
-					.build();
-
-			final Request certRequest = new Request.Builder()
-					.url(certUrl)
-					.build();
-
-			callback = callbackContext;
-			client.newCall(certRequest).enqueue(new Callback()
+			@Override
+			public void onFailure(final Call call, final IOException e)
 			{
-				@Override
-				public void onFailure(final Call call, final IOException e)
+				e.printStackTrace();
+				sslHandler.cancel();
+			}
+
+			@Override
+			public void onResponse(final Call call, final Response response)
+			{
+				try
 				{
-					callbackContext.error(e.getMessage());
-				}
+					final byte[] certBytes = response.body().bytes();
+					final ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
+					final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
+					builder.setTitle("Install Certificate")
+							.setMessage("Databox requires you to install a certificate to be able to use it securely.")
+							.setPositiveButton("Install", (dialog, id) -> {
+								try
+								{
+									CertificateFactory fact = CertificateFactory.getInstance("X.509");
+									cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
 
-				@Override
-				public void onResponse(final Call call, final Response response)
+									final Intent installIntent = KeyChain.createInstallIntent();
+									installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
+									installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
+
+									cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
+								}
+								catch (Exception e)
+								{
+									Log.i(TAG, e.getMessage(), e);
+								}
+							})
+							.setNegativeButton("Cancel", (dialog, id) -> sslHandler.cancel());
+					// Create the AlertDialog object and return it#
+					cordova.getActivity().runOnUiThread(() -> {
+						AlertDialog dialog = builder.create();
+						dialog.show();
+					});
+				}
+				catch (Exception e)
 				{
-					try
-					{
-						final byte[] certBytes = response.body().bytes();
-						final ContextThemeWrapper themedContext = new ContextThemeWrapper(cordova.getActivity(), android.R.style.Theme_DeviceDefault_Light_Dialog);
-						final AlertDialog.Builder builder = new AlertDialog.Builder(themedContext);
-						builder.setTitle("Install Certificate")
-								.setMessage("Databox requires you to install a certificate to be able to use it securely.")
-								.setPositiveButton("Install", (dialog, id) -> {
-									try
-									{
-										CertificateFactory fact = CertificateFactory.getInstance("X.509");
-										cert = fact.generateCertificate(new ByteArrayInputStream(certBytes));
-
-										final Intent installIntent = KeyChain.createInstallIntent();
-										installIntent.putExtra(KeyChain.EXTRA_CERTIFICATE, certBytes);
-										installIntent.putExtra(KeyChain.EXTRA_NAME, "Databox");
-
-										cordova.startActivityForResult(SensingKit.this, installIntent, INSTALL_KEYCHAIN_CODE);
-									}
-									catch (Exception e)
-									{
-										Log.i(TAG, e.getMessage(), e);
-									}
-								})
-								.setNegativeButton("Cancel", (dialog, id) -> callbackContext.error("Refuesed Cert"));
-						// Create the AlertDialog object and return it#
-						cordova.getActivity().runOnUiThread(() -> {
-							AlertDialog dialog = builder.create();
-							dialog.show();
-						});
-					}
-					catch (Exception e)
-					{
-						Log.i(TAG, e.getMessage(), e);
-					}
+					Log.i(TAG, e.getMessage(), e);
 				}
-			});
-		}
-		else
-		{
-			callbackContext.error("Cert exists");
-		}
+			}
+		});
 	}
 
 	private void startSensor(final SKSensorModuleType sensor) throws SKException
 	{
-		logger.info("Starting " + getSensorName(sensor));
+		//logger.info("Starting " + getSensorName(sensor));
 		if (sensor == SKSensorModuleType.LOCATION && ContextCompat.checkSelfPermission(cordova.getActivity(), Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
 		{
 			ActivityCompat.requestPermissions(cordova.getActivity(), new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, LOCATION_PERMISSION);
@@ -538,7 +586,7 @@ public class SensingKit extends CordovaPlugin
 				{
 					if (!sensors.contains(getSensorName(type)))
 					{
-						logger.info("Stopping " + getSensorName(type));
+						//logger.info("Stopping " + getSensorName(type));
 						sensingKit.stopContinuousSensingWithSensor(type);
 						final SensorListener listener = listeners.get(type);
 						if (listener != null)
@@ -557,12 +605,9 @@ public class SensingKit extends CordovaPlugin
 						}
 					}
 				}
-				else
+				else if (sensors.contains(getSensorName(type)))
 				{
-					if (sensors.contains(getSensorName(type)))
-					{
-						startSensor(type);
-					}
+					startSensor(type);
 				}
 			}
 			catch (SKException e)
@@ -577,16 +622,14 @@ public class SensingKit extends CordovaPlugin
 	{
 		if (requestCode == INSTALL_KEYCHAIN_CODE)
 		{
-			switch (resultCode)
+			if (resultCode == Activity.RESULT_OK)
 			{
-				case Activity.RESULT_OK:
-					createTrustManager();
-
-					callback.success();
-
-					break;
-				default:
-					callback.error("Refused Cert");
+				createTrustManager();
+				sslHandler.proceed();
+			}
+			else
+			{
+				sslHandler.cancel();
 			}
 		}
 		else
