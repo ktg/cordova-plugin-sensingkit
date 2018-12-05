@@ -1,10 +1,4 @@
 module.exports = {
-	installCert: function (url, callback) {
-		cordova.exec(callback, function (err) {
-			callback('Error: ' + err);
-		}, "SensingKit", "installCert", [url]);
-	},
-
 	stop: function (callback) {
 		cordova.exec(callback, function (err) {
 			callback('Error: ' + err);
